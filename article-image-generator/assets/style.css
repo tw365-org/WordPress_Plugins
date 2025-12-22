@@ -1,0 +1,98 @@
+.aig-box{
+  max-width: 720px;
+  padding: 18px;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+}
+
+.aig-input{
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.18);
+  outline: none;
+  font-size: 14px;
+}
+
+.aig-btn{
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: none;
+  background: #111;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.aig-btn[disabled]{
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.aig-alert{
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.aig-alert-error{
+  background: rgba(255,0,0,0.06);
+  border: 1px solid rgba(255,0,0,0.18);
+}
+
+.aig-result{
+  margin-top: 14px;
+}
+
+.aig-preview{
+  width: 100%;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.10);
+  display: block;
+}
+
+.aig-actions{
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.aig-download, .aig-save{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.aig-download{
+  background: #111;
+  color: #fff;
+}
+
+.aig-save{
+  border: 1px solid rgba(0,0,0,0.18);
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+}
+
+.aig-save[disabled]{
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.aig-saved{
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.9;
+}
