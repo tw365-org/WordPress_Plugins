@@ -1,0 +1,503 @@
+/**
+ * Plugin Name: My-Tiny-Admin-AI-Companion
+ * Description: 企業級 WordPress 後台 AI 智能助手，整合 ChatGPT, Gemini, Grok, Groq。已更新 Groq 模型為最新的 Llama 3.3。
+ * Version: 1.3.2 (Groq Model Fixed)
+ * Author: WP TW Architect
+ * Text Domain: my-tiny-admin-ai
+ * Requires at least: 6.0
+ * Requires PHP: 7.4
+ * License: GPLv2 or later
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit; // 資安防護：防止直接存取檔案
+}
+
+/**
+ * Class My_Tiny_Admin_AI_Companion
+ * 核心控制器：負責設定、UI 渲染與 API 請求轉發。
+ */
+class My_Tiny_Admin_AI_Companion {
+
+    const OPTION_KEY = 'my_tiny_admin_ai_config';
+    const NONCE_ACTION = 'my_tiny_admin_ai_chat_nonce';
+
+    public function __construct() {
+        if ( is_admin() ) {
+            add_action( 'admin_menu', [ $this, 'register_settings_page' ] );
+            add_action( 'admin_init', [ $this, 'register_settings' ] );
+            add_action( 'admin_footer', [ $this, 'render_chat_interface' ] );
+        }
+
+        // AJAX Handlers
+        add_action( 'wp_ajax_my_tiny_admin_ai_chat', [ $this, 'handle_chat_request' ] );
+        add_action( 'wp_ajax_my_tiny_admin_ai_test_connection', [ $this, 'handle_test_connection' ] );
+    }
+
+    // =========================================================================
+    // 1. 設定頁面 (Settings)
+    // =========================================================================
+
+    public function register_settings_page() {
+        add_options_page(
+            'My Tiny Admin AI 設定',
+            'My Tiny AI',
+            'manage_options',
+            'my-tiny-admin-ai-settings',
+            [ $this, 'render_settings_form' ]
+        );
+    }
+
+    public function register_settings() {
+        register_setting( 'my_tiny_admin_ai_settings_group', self::OPTION_KEY, [
+            'sanitize_callback' => [ $this, 'sanitize_config' ]
+        ] );
+    }
+
+    public function sanitize_config( $input ) {
+        $clean = [];
+        if ( isset( $input['openai_key'] ) ) $clean['openai_key'] = sanitize_text_field( $input['openai_key'] );
+        if ( isset( $input['gemini_key'] ) ) $clean['gemini_key'] = sanitize_text_field( $input['gemini_key'] );
+        if ( isset( $input['grok_key'] ) )   $clean['grok_key']   = sanitize_text_field( $input['grok_key'] );
+        if ( isset( $input['groq_key'] ) )   $clean['groq_key']   = sanitize_text_field( $input['groq_key'] );
+        return $clean;
+    }
+
+    public function render_settings_form() {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        $config = get_option( self::OPTION_KEY, [] );
+        ?>
+        <div class="wrap">
+            <h1>My-Tiny-Admin-AI-Companion 設定</h1>
+            <p>設定各家 AI 模型的 API Key。系統已更新 Groq 模型為最新的 Llama 3.3，請重新測試連線。</p>
+            
+            <form method="post" action="options.php">
+                <?php settings_fields( 'my_tiny_admin_ai_settings_group' ); ?>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">OpenAI API Key</th>
+                        <td>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="password" id="input_openai" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[openai_key]" value="<?php echo esc_attr( $config['openai_key'] ?? '' ); ?>" class="regular-text" />
+                                <button type="button" class="button ai-test-btn" data-provider="openai" data-input="input_openai">測試連線</button>
+                                <span class="test-result" id="res_input_openai"></span>
+                            </div>
+                            <p class="description">模型：GPT-4o / GPT-3.5</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Google Gemini API Key</th>
+                        <td>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="password" id="input_gemini" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[gemini_key]" value="<?php echo esc_attr( $config['gemini_key'] ?? '' ); ?>" class="regular-text" />
+                                <button type="button" class="button ai-test-btn" data-provider="gemini" data-input="input_gemini">測試連線</button>
+                                <span class="test-result" id="res_input_gemini"></span>
+                            </div>
+                            <p class="description">模型：Gemini 1.5 Flash (自動降級至 Pro)</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">xAI Grok API Key</th>
+                        <td>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="password" id="input_grok" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[grok_key]" value="<?php echo esc_attr( $config['grok_key'] ?? '' ); ?>" class="regular-text" />
+                                <button type="button" class="button ai-test-btn" data-provider="grok" data-input="input_grok">測試連線</button>
+                                <span class="test-result" id="res_input_grok"></span>
+                            </div>
+                            <p class="description">模型：Grok Beta</p>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Groq API Key</th>
+                        <td>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="password" id="input_groq" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[groq_key]" value="<?php echo esc_attr( $config['groq_key'] ?? '' ); ?>" class="regular-text" />
+                                <button type="button" class="button ai-test-btn" data-provider="groq" data-input="input_groq">測試連線</button>
+                                <span class="test-result" id="res_input_groq"></span>
+                            </div>
+                            <p class="description">模型：Llama 3.3 70B (最新版)</p>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(); ?>
+            </form>
+        </div>
+
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const btns = document.querySelectorAll('.ai-test-btn');
+            btns.forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const provider = btn.dataset.provider;
+                    const inputId = btn.dataset.input;
+                    const inputEl = document.getElementById(inputId);
+                    const resEl = document.getElementById('res_' + inputId);
+                    const apiKey = inputEl.value.trim();
+
+                    if (!apiKey) {
+                        resEl.innerHTML = '<span style="color:red;">❌ 請先輸入 Key</span>';
+                        return;
+                    }
+
+                    btn.disabled = true;
+                    btn.innerText = '測試中...';
+                    resEl.innerHTML = '';
+
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'my_tiny_admin_ai_test_connection');
+                        formData.append('nonce', '<?php echo wp_create_nonce( self::NONCE_ACTION ); ?>');
+                        formData.append('provider', provider);
+                        formData.append('api_key', apiKey); 
+
+                        const response = await fetch(ajaxurl, { method: 'POST', body: formData });
+                        const data = await response.json();
+
+                        if (data.success) {
+                            resEl.innerHTML = '<span style="color:green; font-weight:bold;">✅ 連線成功</span>';
+                        } else {
+                            resEl.innerHTML = '<span style="color:red;">❌ 失敗: ' + (data.data || '未知錯誤') + '</span>';
+                        }
+                    } catch (err) {
+                        resEl.innerHTML = '<span style="color:red;">❌ 網路錯誤</span>';
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerText = '測試連線';
+                    }
+                });
+            });
+        });
+        </script>
+        <?php
+    }
+
+    // =========================================================================
+    // 2. 懸浮視窗 UI
+    // =========================================================================
+
+    public function render_chat_interface() {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        ?>
+        <div id="my-tiny-admin-ai-widget" style="position: fixed; bottom: 20px; right: 20px; z-index: 99999; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            
+            <button id="my-tiny-admin-ai-toggle" title="開啟 AI 助手" style="width: 60px; height: 60px; border-radius: 50%; background: #2271b1; color: #fff; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                <span class="dashicons dashicons-superhero" style="font-size: 28px; width: 28px; height: 28px;"></span>
+            </button>
+
+            <div id="my-tiny-admin-ai-window" style="display: none; position: absolute; bottom: 80px; right: 0; width: 380px; height: 500px; background: #fff; border: 1px solid #ccd0d4; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); flex-direction: column; overflow: hidden;">
+                
+                <div style="padding: 12px 15px; background: #f0f0f1; border-bottom: 1px solid #ccd0d4; display: flex; justify-content: space-between; align-items: center;">
+                    <strong style="font-size:14px;">My Tiny AI</strong>
+                    <span id="my-tiny-admin-ai-close" style="cursor:pointer; color:#666; font-size:18px; padding:0 5px;">&times;</span>
+                </div>
+
+                <div id="my-tiny-admin-ai-messages" style="flex: 1; padding: 15px; overflow-y: auto; background: #fff; font-size: 14px; line-height: 1.5;">
+                    <div class="ai-msg" style="background: #f0f6fc; padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; color: #1d2327; border: 1px solid #e2e4e7;">
+                        👋 你好！我是你的後台 AI 助手。<br>若需要查詢最新資訊，請選擇 Gemini 並勾選「聯網」。
+                    </div>
+                </div>
+
+                <div style="padding: 10px; border-top: 1px solid #ccd0d4; display: flex; gap: 8px; background: #f6f7f7; align-items: center;">
+                    
+                    <select id="my-tiny-admin-ai-model" style="font-size: 12px; padding: 0 20px 0 5px; height: 36px; border: 1px solid #8c8f94; border-radius: 4px; cursor: pointer; background-color: #fff; flex-shrink: 0;">
+                        <option value="openai">OpenAI</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="grok">Grok</option>
+                        <option value="groq">Groq</option>
+                    </select>
+
+                    <label style="display: flex; align-items: center; font-size: 12px; color: #50575e; cursor: pointer; flex-shrink: 0;" title="啟用網路搜尋 (僅 Gemini 支援)">
+                        <input type="checkbox" id="my-tiny-admin-ai-search" style="margin: 0 4px 0 0;"> 聯網
+                    </label>
+
+                    <input type="text" id="my-tiny-admin-ai-input" placeholder="輸入指令..." style="flex: 1; padding: 8px; height: 36px; border: 1px solid #8c8f94; border-radius: 4px; min-width: 0;">
+                    
+                    <button id="my-tiny-admin-ai-send" style="background: #2271b1; color: #fff; border: none; padding: 0 15px; height: 36px; border-radius: 4px; cursor: pointer; white-space: nowrap; flex-shrink: 0;">送出</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        (function() {
+            document.addEventListener('DOMContentLoaded', function() {
+                const toggle = document.getElementById('my-tiny-admin-ai-toggle');
+                const closeBtn = document.getElementById('my-tiny-admin-ai-close');
+                const windowEl = document.getElementById('my-tiny-admin-ai-window');
+                const sendBtn = document.getElementById('my-tiny-admin-ai-send');
+                const input = document.getElementById('my-tiny-admin-ai-input');
+                const msgs = document.getElementById('my-tiny-admin-ai-messages');
+                const modelSelect = document.getElementById('my-tiny-admin-ai-model');
+                const searchCheck = document.getElementById('my-tiny-admin-ai-search');
+
+                function toggleChat() {
+                    if(!windowEl) return;
+                    const isHidden = windowEl.style.display === 'none';
+                    windowEl.style.display = isHidden ? 'flex' : 'none';
+                    if (isHidden && input) input.focus();
+                }
+
+                if(toggle) toggle.addEventListener('click', toggleChat);
+                if(closeBtn) closeBtn.addEventListener('click', () => { windowEl.style.display = 'none'; });
+
+                function addMessage(text, type) {
+                    if(!msgs) return;
+                    const div = document.createElement('div');
+                    div.style.padding = '10px 12px';
+                    div.style.borderRadius = '8px';
+                    div.style.marginBottom = '10px';
+                    div.style.maxWidth = '90%';
+                    div.style.wordBreak = 'break-word';
+                    
+                    if (type === 'user') {
+                        div.style.background = '#2271b1';
+                        div.style.color = '#fff';
+                        div.style.alignSelf = 'flex-end';
+                        div.style.marginLeft = 'auto';
+                    } else {
+                        div.style.background = '#f0f6fc';
+                        div.style.color = '#1d2327';
+                        div.style.border = '1px solid #e2e4e7';
+                    }
+                    let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    formattedText = formattedText.replace(/\n/g, '<br>');
+                    div.innerHTML = formattedText; 
+                    
+                    msgs.appendChild(div);
+                    msgs.scrollTop = msgs.scrollHeight; 
+                }
+
+                async function handleSend() {
+                    if(!input || !sendBtn) return;
+                    const text = input.value.trim();
+                    if (!text) return;
+
+                    addMessage(text, 'user');
+                    input.value = '';
+                    input.disabled = true;
+                    sendBtn.disabled = true;
+                    const originalBtnText = sendBtn.innerText;
+                    sendBtn.innerText = '...';
+
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'my_tiny_admin_ai_chat');
+                        formData.append('nonce', '<?php echo wp_create_nonce( self::NONCE_ACTION ); ?>');
+                        formData.append('message', text);
+                        formData.append('provider', modelSelect ? modelSelect.value : 'openai');
+                        formData.append('enable_search', searchCheck && searchCheck.checked ? '1' : '0');
+
+                        const response = await fetch(ajaxurl, { method: 'POST', body: formData });
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            addMessage(data.data.reply, 'ai');
+                        } else {
+                            addMessage('錯誤: ' + (data.data || '伺服器異常'), 'ai');
+                        }
+                    } catch (e) {
+                        addMessage('連線失敗 (Network Error)', 'ai');
+                        console.error(e);
+                    } finally {
+                        input.disabled = false;
+                        sendBtn.disabled = false;
+                        sendBtn.innerText = originalBtnText;
+                        input.focus();
+                    }
+                }
+
+                if(sendBtn) sendBtn.addEventListener('click', handleSend);
+                if(input) {
+                    input.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') handleSend();
+                    });
+                }
+            });
+        })();
+        </script>
+        <?php
+    }
+
+    // =========================================================================
+    // 3. AJAX Logic
+    // =========================================================================
+
+    public function handle_chat_request() {
+        check_ajax_referer( self::NONCE_ACTION, 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '權限不足' );
+
+        $message = sanitize_text_field( $_POST['message'] );
+        $provider = sanitize_text_field( $_POST['provider'] );
+        $enable_search = isset($_POST['enable_search']) && $_POST['enable_search'] === '1';
+
+        $config = get_option( self::OPTION_KEY, [] );
+        $reply = '';
+
+        if ( $enable_search && $provider !== 'gemini' ) {
+            $error_msg = "⚠️ <strong>功能限制提示</strong><br>目前僅 <strong>Google Gemini</strong> 支援免設定原生聯網搜尋。<br><br>請切換模型至 Gemini 以獲取即時資訊。";
+            wp_send_json_success( [ 'reply' => $error_msg ] );
+            return;
+        }
+
+        switch ( $provider ) {
+            case 'gemini':
+                $reply = $this->call_gemini( $message, $config['gemini_key'] ?? '', $enable_search );
+                break;
+            case 'grok':
+                $reply = $this->call_openai_compatible( $message, $config['grok_key'] ?? '', 'https://api.x.ai/v1/chat/completions', 'grok-beta', 'xAI Grok' );
+                break;
+            case 'groq':
+                // [FIXED] Updated to Llama 3.3
+                $reply = $this->call_openai_compatible( $message, $config['groq_key'] ?? '', 'https://api.groq.com/openai/v1/chat/completions', 'llama-3.3-70b-versatile', 'Groq' );
+                break;
+            case 'openai':
+            default:
+                $reply = $this->call_openai_compatible( $message, $config['openai_key'] ?? '', 'https://api.openai.com/v1/chat/completions', 'gpt-4o', 'OpenAI' );
+                break;
+        }
+
+        if ( is_wp_error( $reply ) ) wp_send_json_error( $reply->get_error_message() );
+        wp_send_json_success( [ 'reply' => $reply ] );
+    }
+
+    public function handle_test_connection() {
+        check_ajax_referer( self::NONCE_ACTION, 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '權限不足' );
+
+        $provider = sanitize_text_field( $_POST['provider'] );
+        $api_key  = sanitize_text_field( $_POST['api_key'] );
+
+        if ( empty( $api_key ) ) {
+            $labels = ['openai'=>'OpenAI', 'gemini'=>'Google Gemini', 'grok'=>'xAI Grok', 'groq'=>'Groq'];
+            $label = $labels[$provider] ?? 'API';
+            wp_send_json_error( "未設定 $label API Key" );
+        }
+
+        $test_message = "Hello (Ping Test)";
+        $reply = '';
+
+        switch ( $provider ) {
+            case 'gemini':
+                $reply = $this->call_gemini( $test_message, $api_key, false );
+                break;
+            case 'grok':
+                $reply = $this->call_openai_compatible( $test_message, $api_key, 'https://api.x.ai/v1/chat/completions', 'grok-beta', 'xAI Grok' );
+                break;
+            case 'groq':
+                // [FIXED] Updated to Llama 3.3
+                $reply = $this->call_openai_compatible( $test_message, $api_key, 'https://api.groq.com/openai/v1/chat/completions', 'llama-3.3-70b-versatile', 'Groq' );
+                break;
+            case 'openai':
+            default:
+                $reply = $this->call_openai_compatible( $test_message, $api_key, 'https://api.openai.com/v1/chat/completions', 'gpt-3.5-turbo', 'OpenAI' );
+                break;
+        }
+
+        if ( is_wp_error( $reply ) ) wp_send_json_error( $reply->get_error_message() );
+        wp_send_json_success( '連線成功' );
+    }
+
+    // =========================================================================
+    // 4. API Wrappers
+    // =========================================================================
+
+    private function call_openai_compatible( $message, $api_key, $endpoint, $model, $provider_label = 'API' ) {
+        if ( empty( $api_key ) ) return new WP_Error( 'missing_key', '未設定 ' . $provider_label . ' API Key' );
+
+        $body = [
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => 'You are a helpful WordPress expert assistant. Please answer in Traditional Chinese (Taiwan).'],
+                ['role' => 'user', 'content' => $message]
+            ],
+            'max_tokens' => 1000 
+        ];
+
+        if ( strpos( $message, 'Ping Test' ) !== false ) {
+            $body['max_tokens'] = 10;
+        }
+
+        $args = [
+            'body'        => wp_json_encode( $body ),
+            'headers'     => [
+                'Content-Type'  => 'application/json',
+                'Authorization' => 'Bearer ' . $api_key,
+            ],
+            'timeout'     => 30,
+            'sslverify'   => true,
+        ];
+
+        $response = wp_remote_post( $endpoint, $args );
+
+        if ( is_wp_error( $response ) ) return $response;
+        
+        $code = wp_remote_retrieve_response_code( $response );
+        if ( $code !== 200 ) {
+            $err_msg = $provider_label . ' API 錯誤 (' . $code . ')';
+            $body_res = json_decode( wp_remote_retrieve_body( $response ), true );
+            if(isset($body_res['error']['message'])) $err_msg .= ': ' . $body_res['error']['message'];
+            return new WP_Error( 'api_error', $err_msg );
+        }
+
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        return $body['choices'][0]['message']['content'] ?? 'API 回傳格式無法解析';
+    }
+
+    private function call_gemini( $message, $api_key, $enable_search = false ) {
+        if ( empty( $api_key ) ) return new WP_Error( 'missing_key', '未設定 Google Gemini API Key' );
+
+        $models_to_try = ['gemini-1.5-flash'];
+        if ( ! $enable_search ) {
+            $models_to_try[] = 'gemini-pro';
+        }
+
+        $last_error = null;
+
+        foreach ( $models_to_try as $model ) {
+            $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent?key=' . $api_key;
+            
+            $body = [
+                'contents' => [
+                    [ 'parts' => [ ['text' => "請用繁體中文(台灣)回答，你是 WordPress 專家：\n" . $message] ] ]
+                ]
+            ];
+
+            if ( $enable_search && $model === 'gemini-1.5-flash' ) {
+                $body['tools'] = [ ['googleSearch' => new stdClass()] ];
+            }
+
+            $args = [
+                'body'    => wp_json_encode( $body ),
+                'headers' => [ 'Content-Type' => 'application/json' ],
+                'timeout' => 45,
+                'sslverify' => true,
+            ];
+
+            $response = wp_remote_post( $url, $args );
+
+            if ( is_wp_error( $response ) ) {
+                $last_error = $response;
+                continue;
+            }
+
+            $code = wp_remote_retrieve_response_code( $response );
+
+            if ( $code === 200 ) {
+                $data = json_decode( wp_remote_retrieve_body( $response ), true );
+                return $data['candidates'][0]['content']['parts'][0]['text'] ?? 'API 回傳格式無法解析';
+            }
+
+            if ( $code === 404 ) {
+                $last_error = new WP_Error( 'api_error', "Gemini 模型 ($model) 未啟用或不支援 (404)" );
+                continue;
+            }
+
+            $err_body = json_decode( wp_remote_retrieve_body( $response ), true );
+            $msg = $err_body['error']['message'] ?? "API 錯誤 $code";
+            return new WP_Error( 'api_error', "Gemini 錯誤: " . $msg );
+        }
+
+        return $last_error ?: new WP_Error( 'api_error', '所有 Gemini 模型皆連線失敗，請檢查 API 權限。' );
+    }
+}
+
+new My_Tiny_Admin_AI_Companion();
